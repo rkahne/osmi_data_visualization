@@ -1,0 +1,584 @@
+---
+title: "Data.World Challenge, March 4, 2017"
+output: html_notebook
+---
+
+## Read in the data and add important libraries
+```{r}
+library(tidyverse)
+library(ggrepel)
+library(stringr)
+library(forcats)
+library(plotly)
+library(RColorBrewer)
+library(scales)
+
+osmi <- read_csv('https://query.data.world/s/8uz6ss7hqbxy4vnrejaqohx09')
+```
+
+## Functions and frames to use in mutating the data
+```{r}
+condition_check <- function(i, cond){
+  cond_v <- str_split(cond, '\\|') %>% unlist()
+  for(j in 1:length(cond_v)){
+    if(T %in% (str_split(i, '\\|') %>%
+               unlist() %>% 
+               str_detect(ignore.case(cond_v[j])))) return(T)
+  }
+  F
+}
+
+gender_check <- function(i, gender){
+  if(is.na(i)) return(NA)
+  gender_v <- str_split(gender, '\\|') %>% unlist()
+  if(str_length(i) == 1){
+    if(str_detect(i, ignore.case(gender_v[which(str_length(gender_v) == 1)]))) return(T)
+  }
+  for(j in 1:length(gender_v)){
+    if(str_detect(i, ignore.case(paste0('^',gender_v[j])))) return(T)
+  }
+  F
+}
+
+resp_to_lgl <- function(i){
+  if(is.na(i)) NA
+  else if(i == 'Yes') T
+  else F
+}
+
+state_region <- tibble(
+  state =  c('alaska','hawaii','washington','oregon','california','arizona','nevada','idaho','montana','wyoming','utah','new mexico','colorado','north dakota','south dakota', 'nebraska', 'kansas', 'missouri', 'iowa', 'minnesota', 'wisconsin', 'illinois', 'indiana', 'michigan','ohio','texas','oklahoma', 'arkansas', 'louisiana', 'mississippi', 'tennessee', 'kentucky', 'alabama','florida', 'georgia','south carolina', 'north carolina', 'virginia', 'west virginia', 'dc', 'maryland', 'deleware', 'pennsylvania','new jersey', 'new york', 'connecticut', 'rhode island', 'massachusetts', 'vermont', 'new hampshire', 'maine'),
+  region = c(rep('West',13),rep('Midwest',12),rep('South',17),rep('Northeast',9))
+)
+
+find_region <- function(i){
+         if(is.na(i)) NA
+         else state_region$region[which(str_detect(i, ignore.case(state_region$state)) == T)[1]]
+}
+
+country_continent <- read_csv('https://commondatastorage.googleapis.com/ckannet-storage/2012-07-26T090250/Countries-Continents-csv.csv')
+country_continent$Country[168] <- 'United States of America'
+country_continent$Country[86] <- 'Russia'
+find_continent <- function(i){
+  if(is.na(i)) NA
+  else if(i == 'Other') NA
+  else if(i == 'Taiwan') 'Asia'
+  else country_continent$Continent[which(str_detect(ignore.case(i), paste0('^',ignore.case(country_continent$Country))))]
+}
+```
+
+
+## Mutate the data to make columns we can use
+
+```{r}
+new_osmi <- osmi %>% 
+  mutate(back_end = map_lgl(`Which of the following best describes your work position?`,
+                            function(i) str_detect(i, ignore.case('back-end'))),
+         front_end = map_lgl(`Which of the following best describes your work position?`,
+                             function(i) str_detect(i, ignore.case('front-end'))),
+         design = map_lgl(`Which of the following best describes your work position?`,
+                            function(i) str_detect(i, ignore.case('design'))),
+         executive = map_lgl(`Which of the following best describes your work position?`,
+                               function(i) str_detect(i, ignore.case('executive'))),
+         supervisor = map_lgl(`Which of the following best describes your work position?`,
+                              function(i) str_detect(i, ignore.case('supervisor'))),
+         dev_ops = map_lgl(`Which of the following best describes your work position?`,
+                           function(i) str_detect(i, ignore.case('devops'))),
+         developer = map_lgl(`Which of the following best describes your work position?`,
+                             function(i) str_detect(i, ignore.case('developer'))),
+         one_person_shop = map_lgl(`Which of the following best describes your work position?`,
+                                   function(i) str_detect(i, ignore.case('one-person shop'))),
+         support = map_lgl(`Which of the following best describes your work position?`,
+                           function(i) str_detect(i, ignore.case('support'))),
+         sys_admin = map_lgl(`Which of the following best describes your work position?`,
+                             function(i) str_detect(i, ignore.case('sysadmin'))),
+         other_job = map_lgl(`Which of the following best describes your work position?`,
+                         function(i) str_detect(i, ignore.case('other'))),
+         dev_evangelist = map_lgl(`Which of the following best describes your work position?`,
+                                  function(i) str_detect(i, ignore.case('dev evangelist'))),
+         team_lead = map_lgl(`Which of the following best describes your work position?`,
+                             function(i) str_detect(i, ignore.case('team lead'))),
+         autism = map2_lgl(`If so, what condition(s) were you diagnosed with?`,
+                           'autism', condition_check),
+         aspergers = map2_lgl(`If so, what condition(s) were you diagnosed with?`,
+                              'asperger', condition_check),
+         anxiety = map2_lgl(`If so, what condition(s) were you diagnosed with?`,
+                            'anxiety', condition_check),
+         substance_abuse = map2_lgl(`If so, what condition(s) were you diagnosed with?`,
+                                    'Substance Use', condition_check),
+         ocd = map2_lgl(`If so, what condition(s) were you diagnosed with?`,
+                        'obsessive-compulsive|obsessive compulsive|ocd', condition_check),
+         add = map2_lgl(`If so, what condition(s) were you diagnosed with?`,
+                        'attention deficit disorder|add', condition_check),
+         depression = map2_lgl(`If so, what condition(s) were you diagnosed with?`,
+                               'depression|depressed', condition_check),
+         gender_dysphoria = map2_lgl(`If so, what condition(s) were you diagnosed with?`,
+                                     'gender dysphoria', condition_check),
+         eating_disorder = map2_lgl(`If so, what condition(s) were you diagnosed with?`,
+                                    'eating disorder|anorexia|bulimia', condition_check),
+         adhd = map2_lgl(`If so, what condition(s) were you diagnosed with?`,
+                         'attention deficit hyperactivity|ADHD', condition_check),
+         ptsd = map2_lgl(`If so, what condition(s) were you diagnosed with?`,
+                         'ptsd|posttraumatic stress|post-traumatic stress', condition_check),
+         male = map2_lgl(`What is your gender?`,
+                         'male|man|m|cisdude|cis male|cis man|cis-male|cis-man', gender_check),
+         female = map2_lgl(`What is your gender?`,
+                           'female|woman|f|ciswoman|cis woman|cis female|cis-woman|cis-female', gender_check),
+         other_gender = map2_lgl(male, female, function(m,f) ifelse(m == F & f == F, T, F)),
+         neg_mental_discuss = map_lgl(`Do you think that discussing a mental health disorder with your employer would have negative consequences?`,
+          resp_to_lgl),
+         dx_mental_health = map_lgl(`Do you currently have a mental health disorder?`, resp_to_lgl),
+         primary_tech = as.logical(`Is your employer primarily a tech company/organization?`),
+         state_region_live = map_chr(`What US state or territory do you live in?`, find_region) %>% factor(),
+         state_region_work = map_chr(`What US state or territory do you work in?`, find_region) %>% factor(),
+         continent_live = map_chr(`What country do you live in?`, find_continent) %>% factor(),
+         continent_work = map_chr(`What country do you work in?`,find_continent) %>% factor(),
+         `How many employees does your company or organization have?` = factor(
+           `How many employees does your company or organization have?`,
+           levels = c(NA, '1-5', '6-25', '26-100', '100-500', 
+                                                    '500-1000', 'More than 1000'), ordered = T),
+         `Does your employer provide mental health benefits as part of healthcare coverage?` =
+           factor(`Does your employer provide mental health benefits as part of healthcare coverage?`),
+         `Has your employer ever formally discussed mental health (for example, as part of a wellness campaign or other official communication)?` =
+           factor(`Has your employer ever formally discussed mental health (for example, as part of a wellness campaign or other official communication)?`),
+         `Does your employer offer resources to learn more about mental health concerns and options for seeking help?` = factor(`Does your employer offer resources to learn more about mental health concerns and options for seeking help?`),
+         `If a mental health issue prompted you to request a medical leave from work, asking for that leave would be:` = factor(`If a mental health issue prompted you to request a medical leave from work, asking for that leave would be:`),
+         `Do you think that discussing a mental health disorder with your employer would have negative consequences?` = factor(`Do you think that discussing a mental health disorder with your employer would have negative consequences?`),
+         `Would you feel comfortable discussing a mental health disorder with your coworkers?` = factor(`Would you feel comfortable discussing a mental health disorder with your coworkers?`),
+         `Would you feel comfortable discussing a mental health disorder with your direct supervisor(s)?` = factor(`Would you feel comfortable discussing a mental health disorder with your direct supervisor(s)?`),
+         `Do you feel that your employer takes mental health as seriously as physical health?` = factor(`Do you feel that your employer takes mental health as seriously as physical health?`),
+         `Have you heard of or observed negative consequences for co-workers who have been open about mental health issues in your workplace?` = factor(`Have you heard of or observed negative consequences for co-workers who have been open about mental health issues in your workplace?`),
+         `Are you self-employed?` = as.logical(`Are you self-employed?`)
+         ) %>%
+  rename(num_ee = `How many employees does your company or organization have?`,
+         employer_mental_health_benefits = `Does your employer provide mental health benefits as part of healthcare coverage?`,
+         employer_discussed_mental_health = `Has your employer ever formally discussed mental health (for example, as part of a wellness campaign or other official communication)?`,
+         employer_offers_mh_resources = `Does your employer offer resources to learn more about mental health concerns and options for seeking help?`,
+         difficulty_asking_for_leave = `If a mental health issue prompted you to request a medical leave from work, asking for that leave would be:`,
+         discussing_mental_health_consequences = `Do you think that discussing a mental health disorder with your employer would have negative consequences?`,
+         comfort_discussing_mh_coworkers = `Would you feel comfortable discussing a mental health disorder with your coworkers?`,
+         comfort_discussing_mh_supervisor = `Would you feel comfortable discussing a mental health disorder with your direct supervisor(s)?`,
+         mh_serious_as_physical = `Do you feel that your employer takes mental health as seriously as physical health?`,
+         observed_neg_consequences = `Have you heard of or observed negative consequences for co-workers who have been open about mental health issues in your workplace?`,
+         self_employed = `Are you self-employed?`)
+```
+## Function for creating T/F DX frames by columns
+* I know that doesn't make any sense and that I should reword it.
+```{r}
+dx_tf_frame_mult <- function(cols){
+  new_osmi %>% 
+    select(dx_mental_health, one_of(cols)) %>% 
+    gather_(key = 'group', value = 'T_F', cols) %>% 
+    filter(T_F == T) %>% 
+    group_by(group, dx_mental_health) %>% 
+    summarize(count = n()) %>% 
+    ungroup() %>% 
+    filter_(!is.na(cols))
+}
+
+dx_tf_frame_single <- function(cols){
+  new_osmi %>% 
+    select(dx_mental_health, one_of(cols)) %>% 
+    group_by_('dx_mental_health', cols) %>% 
+    summarize(count=n()) %>%
+    ungroup() %>%  
+    rename_('group' = cols) %>% 
+    filter(!is.na(group))
+}
+
+
+tf_plot<- function(tf_frame, title){
+  ggplot(tf_frame, aes(x=group, y = count, fill = dx_mental_health, label =count)) +
+    geom_bar(stat = 'identity', position='fill')+
+    geom_label(position = 'fill', show.legend = F) +
+    theme(axis.text.x = element_text(angle = 90)) +
+    theme_minimal()+
+    scale_fill_manual(values = c('#7fcdbb','#2c7fb8'), name = "Diagnosis of\nMental Illness") +
+    scale_y_continuous(labels = percent_format(), name = 'Proportion') +
+    theme(axis.text.x = element_text(angle = 90),
+          axis.title.x = element_blank()) +
+    ggtitle(title)
+}
+
+tf_plot_unfilled <- function(tf_frame, title){
+  ggplot(tf_frame, aes(x=group, y = count, fill = dx_mental_health, label =count)) +
+    geom_bar(stat = 'identity', position='stack')+
+    geom_label(position = 'stack', show.legend = F) +
+    theme(axis.text.x = element_text(angle = 90)) +
+    theme_minimal()+
+    scale_fill_manual(values = c('#7fcdbb','#2c7fb8'), name = "Diagnosis of\nMental Illness") +
+    scale_y_continuous(labels = comma_format(), name = 'Gross Number') +
+    theme(axis.text.x = element_text(angle = 90),
+          axis.title.x = element_blank()) +
+    ggtitle(title)
+}
+
+```
+
+
+
+##Build a plot of those who've been dx'd with mental illness by job.
+```{r}
+
+dx_tf_frame_mult(c("back_end", "front_end", "design", "executive","supervisor","dev_ops", "developer",
+                   "one_person_shop", "support", "sys_admin", "other_job", "dev_evangelist", 
+                   "team_lead")) %>% 
+  tf_plot('Type of Job')
+dx_tf_frame_single('num_ee') %>% tf_plot('Size of Company')
+dx_tf_frame_mult(c('male','female','other_gender')) %>% tf_plot('Gender') 
+dx_tf_frame_single('state_region_live') %>% tf_plot('Region of Residence')
+dx_tf_frame_single('state_region_work') %>% tf_plot('Region of Job')
+dx_tf_frame_single('continent_live') %>% tf_plot('Continent of Residence')
+dx_tf_frame_single('continent_work') %>% tf_plot('Continent of Job')
+
+dx_tf_frame_mult(c("back_end", "front_end", "design", "executive","supervisor","dev_ops", "developer",
+                   "one_person_shop", "support", "sys_admin", "other_job", "dev_evangelist", 
+                   "team_lead")) %>% 
+  tf_plot('Type of Job')
+dx_tf_frame_single('num_ee') %>% tf_plot('Size of Company')
+dx_tf_frame_mult(c('male','female','other_gender')) %>% tf_plot_unfilled('Gender') 
+dx_tf_frame_single('state_region_live') %>% tf_plot_unfilled('Region of Residence')
+dx_tf_frame_single('state_region_work') %>% tf_plot_unfilled('Region of Job')
+dx_tf_frame_single('continent_live') %>% tf_plot_unfilled('Continent of Residence')
+dx_tf_frame_single('continent_work') %>% tf_plot_unfilled('Continent of Job')
+```
+
+## More functions for subsetting and plotting data
+```{r}
+dx_subsets<-function(osmi_subset){
+  osmi_subset %>% 
+    select(autism,aspergers,anxiety, substance_abuse,ocd,add,
+           depression,gender_dysphoria,eating_disorder,adhd,ptsd) %>% 
+    gather(key = condition, value = n, autism,aspergers,anxiety, substance_abuse,ocd,add,
+           depression,gender_dysphoria,eating_disorder,adhd,ptsd) %>%
+    group_by(condition) %>% 
+    summarize(n=sum(n))
+}
+prevalence_plot <- function(prev_df,title, breaks_df, labels_df){
+  ggplot(prev_df %>% filter(group != 'n_total'), aes(x = group, y=n, fill = condition)) +
+    geom_bar(stat='identity', position='fill') +
+    theme_minimal() +
+    scale_fill_brewer(type = 'qual', palette = 3, name = "Mental Illness",
+                      breaks = c('add','adhd','anxiety','aspergers','autism','depression','eating_disorder','gender_dysphoria','ocd','ptsd','substance_abuse'),
+                      labels = c('ADD','ADHD','Anxiety','Aspergers','Autism','Depression','Eating Disorder','Gender Dysphoria','OCD','PTSD','Substance Abuse')) + 
+    scale_y_continuous(labels = percent_format(), name = 'Proportion') +
+    scale_x_discrete(breaks = breaks_df,
+                       labels=labels_df) +
+    theme(axis.text.x = element_text(angle = 90),
+          axis.title.x = element_blank()) +
+    ggtitle(title)
+}
+
+prevalence_plot_unfilled <- function(prev_df,title, breaks_df, labels_df){
+  ggplot(prev_df %>% filter(group != 'n_total'), aes(x = group, y=n, fill = condition)) +
+    geom_bar(stat='identity', position='stack') +
+    theme_minimal() +
+    scale_fill_brewer(type = 'qual', palette = 3, name = "Mental Illness",
+                      breaks = c('add','adhd','anxiety','aspergers','autism','depression','eating_disorder','gender_dysphoria','ocd','ptsd','substance_abuse'),
+                      labels = c('ADD','ADHD','Anxiety','Aspergers','Autism','Depression','Eating Disorder','Gender Dysphoria','OCD','PTSD','Substance Abuse')) + 
+    scale_y_continuous(labels = comma_format(), name = 'Gross Number') +
+    scale_x_discrete(breaks = breaks_df,
+                       labels=labels_df) +
+    theme(axis.text.x = element_text(angle = 90),
+          axis.title.x = element_blank()) +
+    ggtitle(title)
+}
+```
+
+##Build a plot for specific condition by job.
+
+```{r}
+dx_subsets(new_osmi) %>% 
+  left_join(filter(new_osmi, back_end == T) %>% dx_subsets(), by = 'condition', suffix = c('_total','_back_end')) %>% 
+  left_join(filter(new_osmi, front_end == T) %>% dx_subsets(), by = 'condition') %>% 
+  left_join(filter(new_osmi, design == T) %>% dx_subsets(), by = 'condition', suffix = c('_front_end','_design')) %>% 
+  left_join(filter(new_osmi, executive == T) %>% dx_subsets(), by = 'condition') %>% 
+  left_join(filter(new_osmi, supervisor == T) %>% dx_subsets(), by = 'condition', suffix = c('_executive','_supervisor')) %>% 
+  left_join(filter(new_osmi, dev_ops == T) %>% dx_subsets(), by = 'condition') %>% 
+  left_join(filter(new_osmi, developer == T) %>% dx_subsets(), by = 'condition', suffix = c('_dev_ops','_developer')) %>% 
+  left_join(filter(new_osmi, one_person_shop == T) %>% dx_subsets(), by = 'condition') %>% 
+  left_join(filter(new_osmi, support == T) %>% dx_subsets(), by = 'condition', suffix = c('_one_person_shop','_support')) %>% 
+  left_join(filter(new_osmi, sys_admin == T) %>% dx_subsets(), by = 'condition') %>% 
+  left_join(filter(new_osmi, other_job == T) %>% dx_subsets(), by = 'condition', suffix = c('_sys_admin','_other')) %>% 
+  left_join(filter(new_osmi, dev_evangelist == T) %>% dx_subsets(), by = 'condition') %>% 
+  left_join(filter(new_osmi, team_lead == T) %>% dx_subsets(), by = 'condition', suffix = c('_dev_evangelist','_team_lead')) %>% 
+  gather(key = group, value = n, n_total,n_back_end,n_front_end,n_design,n_executive,n_supervisor,
+         n_dev_ops,n_developer,n_one_person_shop,n_support,n_sys_admin,n_other,
+         n_dev_evangelist,n_team_lead) %>% 
+  prevalence_plot('Mental Illness By Job', 
+                  breaks_df=c('n_back_end','n_front_end','n_design','n_executive','n_supervisor','n_dev_ops','n_developer','n_one_person_shop','n_support','n_sys_admin','n_other','n_dev_evangelist','n_team_lead'),
+                  labels_df=c('Back End','Front End','Design','Executive','Supervisor','Dev Ops','Developer (Any Kind)','One Person Shop','Support','Sys Admin','Other','Dev Evangelist','Team Lead'))
+
+dx_subsets(new_osmi) %>% 
+  left_join(filter(new_osmi, back_end == T) %>% dx_subsets(), by = 'condition', suffix = c('_total','_back_end')) %>% 
+  left_join(filter(new_osmi, front_end == T) %>% dx_subsets(), by = 'condition') %>% 
+  left_join(filter(new_osmi, design == T) %>% dx_subsets(), by = 'condition', suffix = c('_front_end','_design')) %>% 
+  left_join(filter(new_osmi, executive == T) %>% dx_subsets(), by = 'condition') %>% 
+  left_join(filter(new_osmi, supervisor == T) %>% dx_subsets(), by = 'condition', suffix = c('_executive','_supervisor')) %>% 
+  left_join(filter(new_osmi, dev_ops == T) %>% dx_subsets(), by = 'condition') %>% 
+  left_join(filter(new_osmi, developer == T) %>% dx_subsets(), by = 'condition', suffix = c('_dev_ops','_developer')) %>% 
+  left_join(filter(new_osmi, one_person_shop == T) %>% dx_subsets(), by = 'condition') %>% 
+  left_join(filter(new_osmi, support == T) %>% dx_subsets(), by = 'condition', suffix = c('_one_person_shop','_support')) %>% 
+  left_join(filter(new_osmi, sys_admin == T) %>% dx_subsets(), by = 'condition') %>% 
+  left_join(filter(new_osmi, other_job == T) %>% dx_subsets(), by = 'condition', suffix = c('_sys_admin','_other')) %>% 
+  left_join(filter(new_osmi, dev_evangelist == T) %>% dx_subsets(), by = 'condition') %>% 
+  left_join(filter(new_osmi, team_lead == T) %>% dx_subsets(), by = 'condition', suffix = c('_dev_evangelist','_team_lead')) %>% 
+  gather(key = group, value = n, n_total,n_back_end,n_front_end,n_design,n_executive,n_supervisor,
+         n_dev_ops,n_developer,n_one_person_shop,n_support,n_sys_admin,n_other,
+         n_dev_evangelist,n_team_lead) %>% 
+  prevalence_plot_unfilled('Mental Illness By Job', 
+                  breaks_df=c('n_back_end','n_front_end','n_design','n_executive','n_supervisor','n_dev_ops','n_developer','n_one_person_shop','n_support','n_sys_admin','n_other','n_dev_evangelist','n_team_lead'),
+                  labels_df=c('Back End','Front End','Design','Executive','Supervisor','Dev Ops','Developer (Any Kind)','One Person Shop','Support','Sys Admin','Other','Dev Evangelist','Team Lead'))
+
+
+```
+
+## Above plot, but for size of company
+
+```{r}
+dx_subsets(filter(new_osmi,num_ee == '1-5')) %>% 
+  left_join(filter(new_osmi,num_ee == '6-25') 
+              %>% dx_subsets(), by = 'condition', suffix = c('_1_5','_6_25')
+            ) %>% 
+  left_join(filter(new_osmi,num_ee == '26-100') 
+              %>% dx_subsets(), by = 'condition'
+            ) %>%
+  left_join(filter(new_osmi,num_ee == '100-500') 
+              %>% dx_subsets(), by = 'condition', suffix = c('_26_100','_100_500')
+            ) %>%
+  left_join(filter(new_osmi,num_ee == '500-1000') 
+              %>% dx_subsets(), by = 'condition'
+            ) %>%
+  left_join(filter(new_osmi,num_ee == 'More than 1000') 
+              %>% dx_subsets(), by = 'condition', suffix = c('_500_1000','_1000_plus')
+            ) %>%  
+  gather(key = group, value = n, n_1_5,n_6_25,n_26_100,n_100_500,n_500_1000,n_1000_plus) %>% 
+  mutate(group = fct_relevel(group,'n_1_5','n_6_25','n_26_100','n_100_500','n_500_1000','n_1000_plus' )) %>% 
+  prevalence_plot('Mental Illness by Company Size',
+                  c('n_1_5','n_6_25','n_26_100','n_100_500','n_500_1000','n_1000_plus'),
+                  c('1-5','6-25','26-100','100-500','500-1000','1000+'))
+```
+
+## This time for gender
+```{r}
+dx_subsets(new_osmi) %>% 
+  left_join(filter(new_osmi, male == T) %>% dx_subsets(), by='condition', suffix = c('_total','_male')) %>% 
+  left_join(filter(new_osmi, female == T) %>% dx_subsets(), by='condition') %>% 
+  left_join(filter(new_osmi, other_gender == T) %>% dx_subsets(), by='condition', suffix = c('_female','_other')) %>% 
+  gather(key = group, value = n, n_male,n_female,n_other) %>% 
+  prevalence_plot('Mental Illness by Gender',
+                  c('n_male','n_female','n_other'),
+                  c('Cis Male','Cis Fmeale','Other'))
+```
+
+
+#Places people Live and Work
+```{r}
+dx_subsets(filter(new_osmi, state_region_work == 'Midwest')) %>% 
+  left_join(filter(new_osmi, state_region_work == 'South') %>% 
+              dx_subsets(), by = 'condition', suffix = c('_Midwest','_South')) %>%
+  left_join(filter(new_osmi, state_region_work == 'West') %>% 
+              dx_subsets(), by = 'condition') %>% 
+  left_join(filter(new_osmi, state_region_work == 'Northeast') %>% 
+              dx_subsets(), by = 'condition', suffix = c('_West','_Northeast')) %>%  
+  gather(key = group, value = n, n_Midwest, n_South, n_West, n_Northeast) %>% 
+  prevalence_plot('Mental Illness by Region (Work)',
+                  c('n_Midwest', 'n_South', 'n_West', 'n_Northeast'),
+                  c('Midwest','South','West','Northeast'))
+
+dx_subsets(filter(new_osmi, state_region_live == 'Midwest')) %>% 
+  left_join(filter(new_osmi, state_region_live == 'South') %>% 
+              dx_subsets(), by = 'condition', suffix = c('_Midwest','_South')) %>%
+  left_join(filter(new_osmi, state_region_live == 'West') %>% 
+              dx_subsets(), by = 'condition') %>% 
+  left_join(filter(new_osmi, state_region_live == 'Northeast') %>% 
+              dx_subsets(), by = 'condition', suffix = c('_West','_Northeast')) %>%  
+  gather(key = group, value = n, n_Midwest, n_South, n_West, n_Northeast) %>%  
+  prevalence_plot('Mental Illness by Region (Live)',
+                  c('n_Midwest', 'n_South', 'n_West', 'n_Northeast'),
+                  c('Midwest','South','West','Northeast'))
+
+dx_subsets(filter(new_osmi, continent_live == 'Europe')) %>% 
+  left_join(filter(new_osmi, continent_live == 'North America') %>% 
+              dx_subsets(), by = 'condition', suffix = c('_Europe','_North_America')) %>%
+  left_join(filter(new_osmi, continent_live == 'Oceania') %>% 
+              dx_subsets(), by = 'condition') %>% 
+  left_join(filter(new_osmi, continent_live == 'South America') %>% 
+              dx_subsets(), by = 'condition', suffix = c('_Oceania','_South_America')) %>%
+  left_join(filter(new_osmi, continent_live == 'Asia') %>% 
+              dx_subsets(), by = 'condition') %>% 
+  left_join(filter(new_osmi, continent_live == 'Africa') %>% 
+              dx_subsets(), by = 'condition', suffix = c('_Asia','_Africa')) %>% 
+  gather(key = group, value = n, n_Europe, n_North_America, n_Oceania, n_South_America, n_Asia, n_Africa) %>% 
+  prevalence_plot('Mental Illness by Continent (Live)',
+                  c('n_Europe', 'n_North_America', 'n_Oceania', 'n_South_America', 'n_Asia', 'n_Africa'),
+                  c('Europe','North America','Oceania','South America','Asia','Africa'))
+
+dx_subsets(filter(new_osmi, continent_work == 'Europe')) %>% 
+  left_join(filter(new_osmi, continent_work == 'North America') %>% 
+              dx_subsets(), by = 'condition', suffix = c('_Europe','_North_America')) %>%
+  left_join(filter(new_osmi, continent_work == 'Oceania') %>% 
+              dx_subsets(), by = 'condition') %>% 
+  left_join(filter(new_osmi, continent_work == 'South America') %>% 
+              dx_subsets(), by = 'condition', suffix = c('_Oceania','_South_America')) %>%
+  left_join(filter(new_osmi, continent_work == 'Asia') %>% 
+              dx_subsets(), by = 'condition') %>% 
+  left_join(filter(new_osmi, continent_work == 'Africa') %>% 
+              dx_subsets(), by = 'condition', suffix = c('_Asia','_Africa')) %>% 
+  gather(key = group, value = n, n_Europe, n_North_America, n_Oceania, n_South_America, n_Asia, n_Africa) %>% 
+  prevalence_plot('Mental Illness by Continent (Work)',
+                  c('n_Europe', 'n_North_America', 'n_Oceania', 'n_South_America', 'n_Asia', 'n_Africa'),
+                  c('Europe','North America','Oceania','South America','Asia','Africa'))
+```
+## Measures of Support
+```{r}
+
+dx_tf_frame_single('employer_mental_health_benefits') %>%
+  filter(!is.na(group)) %>% 
+  tf_plot('Employer Offers Mental Health Benefits')
+dx_tf_frame_single('employer_discussed_mental_health') %>% 
+  filter(!is.na(group)) %>% 
+  tf_plot('Employer Ever Formally Discussed Mental Health')
+dx_tf_frame_single('employer_offers_mh_resources') %>% 
+  filter(!is.na(group)) %>% 
+  tf_plot('Employer Offers Mental Health Resources')
+dx_tf_frame_single('difficulty_asking_for_leave') %>% 
+  filter(!is.na(group)) %>% 
+  tf_plot('Asking For Leave Based On Mental Health Would Be:')
+dx_tf_frame_single('discussing_mental_health_consequences') %>% 
+  filter(!is.na(group)) %>% 
+  tf_plot('Would Discussing Mental Health with Employer Have Negative Consequences')
+dx_tf_frame_single('comfort_discussing_mh_coworkers') %>% 
+  filter(!is.na(group)) %>% 
+  tf_plot('Comfortable Discussing Mental Health Disorder With Coworkers')
+dx_tf_frame_single('comfort_discussing_mh_supervisor') %>% 
+  filter(!is.na(group)) %>% 
+  tf_plot('Comfortable Discussing Mental Health Disorder With Supervisor')
+dx_tf_frame_single('mh_serious_as_physical') %>% 
+  filter(!is.na(group)) %>% 
+  tf_plot('Employer Takes Mental Health As Serious As Physical Health')
+dx_tf_frame_single('observed_neg_consequences') %>%
+  filter(!is.na(group)) %>% 
+  tf_plot('Observed/Experienced Unsupportive Response to Mental Health Issue')
+
+dx_subsets(filter(new_osmi, employer_mental_health_benefits == 'Not eligible for coverage / N/A')) %>% 
+  left_join(filter(new_osmi, employer_mental_health_benefits == 'No') %>% 
+              dx_subsets(), by = 'condition', suffix = c('_not_eligible','_No')) %>%
+  left_join(filter(new_osmi, employer_mental_health_benefits == 'Yes') %>% 
+              dx_subsets(), by = 'condition') %>%
+  left_join(filter(new_osmi, employer_mental_health_benefits == "I don't know") %>% 
+              dx_subsets(), by = 'condition', suffix = c('_Yes','_Dont_know')) %>%
+  gather(key = group, value = n, n_not_eligible, n_No, n_Yes, n_Dont_know) %>% 
+  prevalence_plot('Employer Offers Mental Health Benefits',
+                  c('n_No', 'n_Yes', 'n_Dont_know'),
+                  c('No','Yes',"I Don't Know"))
+
+dx_subsets(new_osmi) %>% 
+  left_join(filter(new_osmi, employer_discussed_mental_health == 'No') %>% 
+              dx_subsets(), by = 'condition', suffix = c('_total','_No')) %>%
+  left_join(filter(new_osmi, employer_discussed_mental_health == 'Yes') %>% 
+              dx_subsets(), by = 'condition') %>%
+  left_join(filter(new_osmi, employer_discussed_mental_health == "I don't know") %>% 
+              dx_subsets(), by = 'condition', suffix = c('_Yes','_Dont_know')) %>%
+  gather(key = group, value = n, n_No, n_Yes, n_Dont_know) %>% 
+  prevalence_plot('Employer Ever Formally Discussed Mental Health',
+                  c('n_No', 'n_Yes', 'n_Dont_know'),
+                  c('No','Yes',"I Don't Know"))
+
+dx_subsets(new_osmi) %>% 
+  left_join(filter(new_osmi, employer_offers_mh_resources == 'No') %>% 
+              dx_subsets(), by = 'condition', suffix = c('_total','_No')) %>%
+  left_join(filter(new_osmi, employer_offers_mh_resources == 'Yes') %>% 
+              dx_subsets(), by = 'condition') %>%
+  left_join(filter(new_osmi, employer_offers_mh_resources == "I don't know") %>% 
+              dx_subsets(), by = 'condition', suffix = c('_Yes','_Dont_know')) %>%
+  gather(key = group, value = n, n_No, n_Yes, n_Dont_know) %>% 
+  prevalence_plot('Employer Offers Mental Health Benefits',
+                  c('n_No', 'n_Yes', 'n_Dont_know'),
+                  c('No','Yes',"I Don't Know"))
+
+dx_subsets(filter(new_osmi, difficulty_asking_for_leave == 'Very easy')) %>%
+  left_join(filter(new_osmi, difficulty_asking_for_leave == 'Somewhat easy') %>% 
+              dx_subsets(), by = 'condition', suffix = c('_very_easy','_somewhat_easy')) %>%
+  left_join(filter(new_osmi, difficulty_asking_for_leave == "Neither easy nor difficult") %>% 
+              dx_subsets(), by = 'condition') %>%
+  left_join(filter(new_osmi, difficulty_asking_for_leave == 'Very difficult') %>% 
+              dx_subsets(), by = 'condition', suffix = c('_not_easy_nor_diff','_very_difficult')) %>%
+  left_join(filter(new_osmi, difficulty_asking_for_leave == "Somewhat difficult") %>% 
+              dx_subsets(), by = 'condition') %>%
+  left_join(filter(new_osmi, difficulty_asking_for_leave == "I don't know") %>% 
+              dx_subsets(), by = 'condition', suffix = c('_somewhat_difficult','_dont_know')) %>%
+  gather(key = group, value = n, n_very_easy, n_somewhat_easy, n_not_easy_nor_diff, n_very_difficult, n_somewhat_difficult, n_dont_know) %>% 
+  mutate(group = fct_relevel(group, 'n_very_easy', 'n_somewhat_easy', 'n_not_easy_nor_diff', 'n_somewhat_difficult', 'n_very_difficult', 'n_dont_know')) %>% 
+  prevalence_plot('Asking For Leave Based On Mental Health Would Be:',
+                  c('n_very_easy', 'n_somewhat_easy', 'n_not_easy_nor_diff', 'n_very_difficult', 'n_somewhat_difficult', 'n_dont_know'),
+                  c('Very Easy','Somewhat Easy','Not Easy Nor Difficult','Very Difficult','Somewhat Difficult',"I Don't Know"))
+
+dx_subsets(new_osmi) %>% 
+  left_join(filter(new_osmi, discussing_mental_health_consequences == 'No') %>% 
+              dx_subsets(), by = 'condition', suffix = c('_total','_No')) %>%
+  left_join(filter(new_osmi, discussing_mental_health_consequences == 'Yes') %>% 
+              dx_subsets(), by = 'condition') %>%
+  left_join(filter(new_osmi, discussing_mental_health_consequences == "Maybe") %>% 
+              dx_subsets(), by = 'condition', suffix = c('_Yes','_Maybe')) %>%
+  gather(key = group, value = n, n_No, n_Yes, n_Maybe) %>% 
+  prevalence_plot('Would Discussing Mental Health with Employer Have Negative Consequences',
+                  c('n_No', 'n_Yes', 'n_Maybe'),
+                  c('No','Yes','Maybe'))
+
+dx_subsets(new_osmi) %>% 
+  left_join(filter(new_osmi, comfort_discussing_mh_coworkers == 'No') %>% 
+              dx_subsets(), by = 'condition', suffix = c('_total','_No')) %>%
+  left_join(filter(new_osmi, comfort_discussing_mh_coworkers == 'Yes') %>% 
+              dx_subsets(), by = 'condition') %>%
+  left_join(filter(new_osmi, comfort_discussing_mh_coworkers == "Maybe") %>% 
+              dx_subsets(), by = 'condition', suffix = c('_Yes','_Maybe')) %>%
+  gather(key = group, value = n, n_No, n_Yes, n_Maybe) %>% 
+  prevalence_plot('Comfortable Discussing Mental Health Disorder With Coworkers',
+                  c('n_No', 'n_Yes', 'n_Maybe'),
+                  c('No','Yes','Maybe'))
+
+dx_subsets(new_osmi) %>% 
+  left_join(filter(new_osmi, comfort_discussing_mh_supervisor == 'No') %>% 
+              dx_subsets(), by = 'condition', suffix = c('_total','_No')) %>%
+  left_join(filter(new_osmi, comfort_discussing_mh_supervisor == 'Yes') %>% 
+              dx_subsets(), by = 'condition') %>%
+  left_join(filter(new_osmi, comfort_discussing_mh_supervisor == "Maybe") %>% 
+              dx_subsets(), by = 'condition', suffix = c('_Yes','_Maybe')) %>%
+  gather(key = group, value = n, n_No, n_Yes, n_Maybe) %>% 
+  prevalence_plot('Comfortable Discussing Mental Health Disorder With Supervisor',
+                  c('n_No', 'n_Yes', 'n_Maybe'),
+                  c('No','Yes','Maybe'))
+
+dx_subsets(new_osmi) %>% 
+  left_join(filter(new_osmi, mh_serious_as_physical == 'No') %>% 
+              dx_subsets(), by = 'condition', suffix = c('_total','_No')) %>%
+  left_join(filter(new_osmi, mh_serious_as_physical == 'Yes') %>% 
+              dx_subsets(), by = 'condition') %>%
+  left_join(filter(new_osmi, mh_serious_as_physical == "I don't know") %>% 
+              dx_subsets(), by = 'condition', suffix = c('_Yes','_Dont_know')) %>%
+  gather(key = group, value = n, n_No, n_Yes, n_Dont_know) %>% 
+  prevalence_plot('Employer Takes Mental Health As Serious As Physical Health',
+                  c('n_No', 'n_Yes', 'n_Dont_know'),
+                  c('No','Yes',"I Don't Know"))
+
+dx_subsets(filter(new_osmi, observed_neg_consequences == 'Yes')) %>% 
+  left_join(filter(new_osmi, observed_neg_consequences == 'No') %>% dx_subsets(), by='condition',suffix = c('_yes','_no')) %>% 
+  gather(key = group, value = n, n_no, n_yes) %>% 
+  prevalence_plot('Observed/Experienced Unsupportive Response to Mental Health Issue',
+                  c('n_no', 'n_yes'),
+                  c('No','Yes'))
+
+```
+##Self Employment
+```{r}
+dx_tf_frame_single('self_employed') %>% tf_plot('Self-Employed')
+
+dx_subsets(filter(new_osmi, self_employed == TRUE)) %>% 
+  left_join(filter(new_osmi, self_employed == FALSE) %>% dx_subsets(), by='condition',suffix = c('_yes','_no')) %>% 
+  gather(key = group, value = n, n_no, n_yes) %>% 
+  prevalence_plot('Self-Employed',
+                  c('n_no','n_yes'),
+                  c('No','Yes'))
+```
+
